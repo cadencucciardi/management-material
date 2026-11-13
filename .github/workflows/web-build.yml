@@ -1,0 +1,54 @@
+# Browser version: every published release also gets web-* files (the game pack from the Mac download plus Godot's web
+# engine), which visoravgs.com/play/<game>/ serves. The Windows and Mac downloads are not touched.
+name: Web build
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build (blank = latest release)
+        required: false
+  push:
+    branches: [claude/cool-ritchie-pmj48d]
+    paths: [".github/workflows/web-build.yml", "tools/web/**"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: web-build-${{ github.event.release.tag_name || github.event.inputs.tag || 'latest' }}
+  cancel-in-progress: false
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pick release
+        id: rel
+        run: |
+          TAG="${{ github.event.release.tag_name || github.event.inputs.tag }}"
+          if [ -z "$TAG" ]; then TAG="$(gh release view --json tagName -q .tagName)"; fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Building the browser version of $TAG"
+      - name: Wait for the Mac download
+        run: |
+          # releases can be published before their downloads finish uploading
+          for i in $(seq 1 60); do
+            if gh release view "${{ steps.rel.outputs.tag }}" --json assets -q '.assets[].name' | grep -q -- '-macOS\.zip$'; then exit 0; fi
+            echo "Mac zip not uploaded yet ($i/60)"; sleep 30
+          done
+          echo "::error::No -macOS.zip on ${{ steps.rel.outputs.tag }} after 30 minutes"; exit 1
+      - name: Build
+        run: |
+          mkdir -p dl out
+          gh release download "${{ steps.rel.outputs.tag }}" --pattern '*-macOS.zip' --dir dl --clobber
+          python3 tools/web/build_web.py "${{ steps.rel.outputs.tag }}" dl/*-macOS.zip out
+      - name: Upload to the release
+        run: gh release upload "${{ steps.rel.outputs.tag }}" out/web-* --clobber
