@@ -10,9 +10,6 @@ on:
       tag:
         description: Release tag to build (blank = latest release)
         required: false
-  push:
-    branches: [claude/cool-ritchie-pmj48d]
-    paths: [".github/workflows/web-build.yml", "tools/web/**"]
 
 permissions:
   contents: write
@@ -28,13 +25,16 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
+      # passed through the environment, not pasted into the scripts, so a tag name can't inject shell
+      REQ_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
     steps:
       - uses: actions/checkout@v4
       - name: Pick release
         id: rel
         run: |
-          TAG="${{ github.event.release.tag_name || github.event.inputs.tag }}"
+          TAG="$REQ_TAG"
           if [ -z "$TAG" ]; then TAG="$(gh release view --json tagName -q .tagName)"; fi
+          if ! printf '%s' "$TAG" | grep -Eq '^[A-Za-z0-9._-]{1,40}$'; then echo "::error::Bad release tag '$TAG'"; exit 1; fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Building the browser version of $TAG"
       - name: Wait for the Mac download
